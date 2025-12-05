@@ -1,0 +1,232 @@
+#lang racket
+(require 2htdp/universe 2htdp/image)
+
+; imágenes
+(define FONDO  (bitmap "fondo.png"))
+(define PACMAN (list (bitmap "pac1.png")(bitmap "pac2.png")(bitmap "pac3.png")(bitmap "pac2.png"))) 
+(define PINK-GHOST  (list (bitmap "ghost1.png")(bitmap "ghost2.png"))) 
+(define MENU1 (bitmap "menu1.png")) 
+(define MENU-GHOST (bitmap "menughost.png")) 
+(define NIVEL1 (bitmap "nivel1.png"))
+(define REINTENTAR (bitmap "reintentar.png"))
+(define MENU2 (bitmap "menu2.png"))
+
+; world
+(struct world (estado pac ghost menu-ghost-x menu-ghost-y pac-x pac-y ghost-x ghost-y jumping jump-t last-dx
+                      obst1-x obst1-y) #:transparent)
+
+(define initial-world
+  (world "inicio" 0 0 0 575 150 600 0 600 #f 0 0 400 600))
+
+; clicks
+(define (click-en-start? x y)
+  (and (>= x 290) (<= x 646)
+       (>= y 360) (<= y 478)))
+
+(define (click-en-nivel1? x y)
+  (and (>= x 155) (<= x 340)
+       (>= y 216) (<= y 430)))
+
+(define (click-reintentar? x y)
+  (and (>= x 155) (<= x 340)
+       (>= y 216) (<= y 430)))
+
+;obstaculos
+
+(define (dibujar-obstaculos w img)
+  (place-image (triangle 50 "solid" "blue")
+               (world-obst1-x w)
+               (world-obst1-y w)
+      img))
+;colision
+
+(define (colision-obstaculo? x y ox oy)
+  (and (>= x (- ox 25)) (<= x (+ ox 25))
+       (>= y (- oy 50)) (<= y oy)))
+
+; tick
+(define (tick w)
+  (cond
+    [(string=? (world-estado w) "inicio")
+     (world "inicio"
+            (modulo (+ 1 (world-pac w)) (length PACMAN))
+            (modulo (+ 1 (world-ghost w)) (length PINK-GHOST))
+            (world-menu-ghost-x w)
+            (world-menu-ghost-y w)
+            (world-pac-x w)
+            (world-pac-y w)
+            (world-ghost-x w)
+            (world-ghost-y w)
+            (world-jumping w)
+            (world-jump-t w)
+            (world-last-dx w)
+            (world-obst1-x w)       
+            (world-obst1-y w))] 
+    
+    [(string=? (world-estado w) "menu1")
+     (world "menu1"
+            (modulo (+ 1 (world-pac w)) (length PACMAN))
+            (modulo (+ 1 (world-ghost w)) (length PINK-GHOST))
+            (+ (world-menu-ghost-x w) 100) ;menu azul 
+            (world-menu-ghost-y w)
+            (world-pac-x w)
+            (world-pac-y w)
+            (world-ghost-x w)
+            (world-ghost-y w)
+            (world-jumping w)
+            (world-jump-t w)
+            (world-last-dx w)
+            (world-obst1-x w)      
+            (world-obst1-y w))] 
+    
+    [(string=? (world-estado w) "nivel1")
+     (let* ([jumping? (world-jumping w)]
+            [t (world-jump-t w)]
+            [jump-duration 4] ; menos ticks = más rápido
+            [jump-height 80]
+            [ground-y 600]
+            [dx (world-last-dx w)]
+            [new-t (if jumping? (+ t 1) t)]
+            ; fórmula parabólica: y = ground - 4h*(t/T)*(1 - t/T)
+            [ratio (/ new-t jump-duration)]
+            [new-y (if jumping?
+                       (- ground-y (* 4 jump-height ratio (- 1 ratio)))
+                       ground-y)]
+             [jumping? (and jumping? (< new-t jump-duration))]
+            [final-t (if jumping? new-t 0)]
+            ;salto parabolico 
+            [new-pac-x (if jumping?
+                       (+ (world-pac-x w) dx)
+                       (world-pac-x w))]
+        [new-ghost-x (- new-pac-x 100)])
+              ;; Colisión con obstáculo
+       (if (colision-obstaculo? new-pac-x new-y (world-obst1-x w) (world-obst1-y w))
+           (world "reintentar"
+                  (world-pac w)(world-ghost w)
+                  (world-menu-ghost-x w)(world-menu-ghost-y w)
+                  new-pac-x new-y
+                  new-ghost-x new-y
+                  jumping?
+                  final-t
+                  dx
+                  (world-obst1-x w)
+                  (world-obst1-y w))
+           (if (colision-obstaculo? new-ghost-x new-y (world-obst1-x w) (world-obst1-y w))
+               (world "menu2"
+                      (world-pac w)(world-ghost w)
+                      (world-menu-ghost-x w)(world-menu-ghost-y w)
+                      new-pac-x new-y
+                      new-ghost-x new-y
+                      jumping?
+                      final-t
+                      dx
+                      (world-obst1-x w)
+                      (world-obst1-y w))
+               (world "nivel1"
+                      (modulo (+ 1 (world-pac w)) (length PACMAN))
+                      (modulo (+ 1 (world-ghost w)) (length PINK-GHOST))
+                      (world-menu-ghost-x w)
+                      (world-menu-ghost-y w)
+                      new-pac-x new-y
+                      new-ghost-x new-y
+                      jumping?
+                      final-t
+                      dx
+                      (world-obst1-x w)
+                      (world-obst1-y w)))))]
+    [else w]))
+
+; mouse
+(define (mouse-handler w x y event)
+  (cond
+    [(and (string=? (world-estado w) "inicio")
+          (string=? event "button-down")
+          (click-en-start? x y))
+     (world "menu1" (world-pac w) (world-ghost w)
+            0 575
+            150 600
+            50 600
+            #f 0 0
+           (world-obst1-x w) (world-obst1-y w))]
+    
+    [(and (string=? (world-estado w) "menu1")
+          (string=? event "button-down")
+          (click-en-nivel1? x y))
+     (world "nivel1"
+            (world-pac w)(world-ghost w)
+            (world-menu-ghost-x w)(world-menu-ghost-y w)
+            200 600
+            100 600
+            #f 0 0
+             (world-obst1-x w) (world-obst1-y w))]
+    [else w]))
+
+; dibujar
+(define (dibujar-nivel1 w)
+  (dibujar-obstaculos w
+  (place-image (list-ref PACMAN (world-pac w)) (world-pac-x w) (world-pac-y w)
+    (place-image (list-ref PINK-GHOST (world-ghost w)) (world-ghost-x w) (world-ghost-y w)
+      NIVEL1))))
+
+(define (draw w)
+  (cond
+    [(string=? (world-estado w) "inicio") 
+     (place-image (list-ref PACMAN (world-pac w)) 100 600
+       (place-image (list-ref PINK-GHOST (world-ghost w)) 850 600
+         FONDO))]
+    [(string=? (world-estado w) "menu1") 
+     (place-image MENU-GHOST (world-menu-ghost-x w) (world-menu-ghost-y w) MENU1)]
+    [(string=? (world-estado w) "nivel1") (dibujar-nivel1 w)]
+    [(string=? (world-estado w) "reintentar") REINTENTAR]
+    [(string=? (world-estado w) "menu2") MENU2]))
+    
+
+; teclado
+
+(define (key-handler w key)
+  (if (string=? (world-estado w) "nivel1")
+      (cond
+        [(string=? key "right")
+         (world "nivel1"
+                (world-pac w)(world-ghost w)
+                (world-menu-ghost-x w)(world-menu-ghost-y w)
+                (+ (world-pac-x w) 20) (world-pac-y w)
+                (+ (world-pac-x w) -80) (world-pac-y w)
+                (world-jumping w)
+                (world-jump-t w)
+                20
+                (world-obst1-x w) (world-obst1-y w))]
+        
+        [(string=? key "left")
+         (world "nivel1"
+                (world-pac w)(world-ghost w)
+                (world-menu-ghost-x w)(world-menu-ghost-y w)
+                (- (world-pac-x w) 20) (world-pac-y w)
+                (- (world-pac-x w) 120) (world-pac-y w)
+                (world-jumping w)
+                (world-jump-t w)
+                -20
+                (world-obst1-x w) (world-obst1-y w))]
+
+        [(string=? key "up")
+        (if (not (world-jumping w))
+            (world "nivel1"
+                (world-pac w)(world-ghost w)
+                (world-menu-ghost-x w)(world-menu-ghost-y w)
+                (world-pac-x w)(world-pac-y w)
+                (world-ghost-x w)(world-ghost-y w)
+                #t ; inicia salto
+                0  ; tiempo de salto
+                (world-last-dx w)
+                 (world-obst1-x w) (world-obst1-y w))
+            w)]; salto usa dx último
+        [else w])
+      w))
+
+
+; big-bang
+(big-bang initial-world
+  [to-draw draw]
+  [on-tick tick 0.2] ; más rápido
+  [on-mouse mouse-handler]
+  [on-key key-handler])
