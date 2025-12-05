@@ -1,0 +1,264 @@
+#lang racket
+(require 2htdp/image)
+(require 2htdp/universe)
+
+;; ===========================================
+;; CONSTANTES DEL JUEGO
+;; ===========================================
+(define ANCHO 950)
+(define ALTO 800)
+(define FONDO (empty-scene ANCHO ALTO "black"))
+(define JUGADOR (circle 5 "solid" "blue"))
+(define COLOR-CAMINO "white")
+(define COLOR-META "lime")
+
+;; Rutas a los archivos
+(define RUTA-IMAGEN "C:/Users/janer danesis/Desktop/mi proyecto/susto.png")
+(define RUTA-SONIDO "C:/Users/janer danesis/Desktop/mi proyecto/grito.wav")
+
+;; Cargar la imagen de susto con manejo de errores
+(define IMAGEN-SUSTO
+  (if (file-exists? RUTA-IMAGEN)
+      (scale 0.6 (bitmap/file RUTA-IMAGEN))
+      (text "IMAGEN NO ENCONTRADA" 24 "red")))
+
+;; ===========================================
+;; ESTRUCTURA DE DATOS
+;; ===========================================
+(struct juego (nivel x y perdio? pausa inicio? audio-reproducido?) #:mutable)
+
+;; ===========================================
+;; FUNCIÓN PARA REPRODUCIR SONIDO
+;; ===========================================
+(define (reproducir-sonido)
+  (when (file-exists? RUTA-SONIDO)
+    (define cmd (string-append "start \"\" \"" RUTA-SONIDO "\""))
+    (system cmd)))
+
+;; ===========================================
+;; NIVELES
+;; ===========================================
+(define (crear-nivel-1)
+  (place-image (rectangle 50 60 "solid" COLOR-META) 780 70
+  (place-image (rectangle 400 60 "solid" COLOR-CAMINO) 600 70
+  (place-image (rectangle 300 700 "solid" COLOR-CAMINO) 370 390
+               FONDO))))
+
+(define (crear-nivel-2)
+  (place-image (rectangle 30 41 "solid" COLOR-META) 130 750
+  (place-image (rectangle 50 190 "solid" COLOR-CAMINO) 850 640
+  (place-image (rectangle 750 40 "solid" COLOR-CAMINO) 500 220
+  (place-image (rectangle 750 50 "solid" COLOR-CAMINO) 500 80
+  (place-image (rectangle 50 110 "solid" COLOR-CAMINO) 150 150
+  (place-image (rectangle 750 40 "solid" COLOR-CAMINO) 500 400
+  (place-image (rectangle 50 130 "solid" COLOR-CAMINO) 150 480
+  (place-image (rectangle 750 40 "solid" COLOR-CAMINO) 500 550
+  (place-image (rectangle 50 160 "solid" COLOR-CAMINO) 850 300
+  (place-image (rectangle 750 40 "solid" COLOR-CAMINO) 500 750
+               FONDO)))))))))))
+
+(define (crear-nivel-3)
+  (place-image (rectangle 70 90 "solid" COLOR-META) 475 140
+  (place-image (rectangle 10 80 "solid" COLOR-CAMINO) 475 190
+  (place-image (rectangle 40 10 "solid" COLOR-CAMINO) 460 230          
+  (place-image (rectangle 10 40 "solid" COLOR-CAMINO) 440 245
+  (place-image (rectangle 40 10 "solid" COLOR-CAMINO) 455 265
+  (place-image (rectangle 10 90 "solid" COLOR-CAMINO) 475 305
+  (place-image (rectangle 60 10 "solid" COLOR-CAMINO) 450 350
+  (place-image (rectangle 320 40 "solid" COLOR-CAMINO) 290 365
+  (place-image (rectangle 40 260 "solid" COLOR-CAMINO) 150 500
+  (place-image (rectangle 570 40 "solid" COLOR-CAMINO) 415 610
+  (place-image (rectangle 40 160 "solid" COLOR-CAMINO) 705 670
+  (place-image (rectangle 600 40 "solid" COLOR-CAMINO) 425 740 
+               FONDO)))))))))))))
+
+;; ===========================================
+;; FUNCIONES DE UTILIDAD
+;; ===========================================
+(define (obtener-nivel num)
+  (cond
+    [(= num 1) (crear-nivel-1)]
+    [(= num 2) (crear-nivel-2)]
+    [(= num 3) (crear-nivel-3)]
+    [else FONDO]))
+
+(define (posicion-inicial nivel)
+  (cond
+    [(= nivel 1) (values 370 390)]
+    [(= nivel 2) (values 150 80)]
+    [(= nivel 3) (values 150 740)]
+    [else (values (/ ANCHO 2) (/ ALTO 2))]))
+
+(define (en-meta? j)
+  (define nivel (juego-nivel j))
+  (define x (juego-x j))
+  (define y (juego-y j))
+  (cond
+    [(= nivel 1) (and (>= x 755) (<= x 805) (>= y 40) (<= y 100))]
+    [(= nivel 2) (and (>= x 115) (<= x 145) (>= y 730) (<= y 765))]
+    [(= nivel 3) (and (>= x 440) (<= x 510) (>= y 95) (<= y 185))]
+    [else #f]))
+
+(define (en-camino-seguro? j)
+  (define nivel (juego-nivel j))
+  (define x (juego-x j))
+  (define y (juego-y j))
+  
+  (cond
+    [(= nivel 1) 
+     (or 
+      (and (>= x 220) (<= x 520) (>= y 40) (<= y 740))
+      (and (>= x 400) (<= x 800) (>= y 40) (<= y 100)))]
+    
+    [(= nivel 2) 
+     (or 
+      (and (>= x 125) (<= x 875) (>= y 730) (<= y 770))
+      (and (>= x 125) (<= x 875) (>= y 55) (<= y 105))
+      (and (>= x 125) (<= x 875) (>= y 200) (<= y 240))
+      (and (>= x 125) (<= x 875) (>= y 380) (<= y 420))
+      (and (>= x 125) (<= x 875) (>= y 530) (<= y 570))
+      (and (>= x 125) (<= x 175) (>= y 95) (<= y 205))
+      (and (>= x 125) (<= x 175) (>= y 415) (<= y 545))
+      (and (>= x 825) (<= x 875) (>= y 220) (<= y 380))
+      (and (>= x 825) (<= x 875) (>= y 545) (<= y 735)))]
+    
+    [(= nivel 3) 
+     (or 
+      (and (>= x 125) (<= x 725) (>= y 720) (<= y 760))
+      (and (>= x 685) (<= x 725) (>= y 590) (<= y 750))
+      (and (>= x 130) (<= x 700) (>= y 590) (<= y 630))
+      (and (>= x 130) (<= x 170) (>= y 370) (<= y 630))
+      (and (>= x 130) (<= x 450) (>= y 345) (<= y 385))
+      (and (>= x 420) (<= x 480) (>= y 345) (<= y 355))
+      (and (>= x 470) (<= x 480) (>= y 260) (<= y 350))
+      (and (>= x 435) (<= x 475) (>= y 260) (<= y 270))
+      (and (>= x 435) (<= x 445) (>= y 225) (<= y 265))
+      (and (>= x 440) (<= x 480) (>= y 225) (<= y 235))
+      (and (>= x 470) (<= x 480) (>= y 150) (<= y 230)))]
+    
+    [else #f]))
+
+(define (toca-negro? j)
+  (and (not (en-camino-seguro? j))
+       (not (en-meta? j))))
+
+(define (debe-perder? j)
+  (or (< (juego-x j) 0) 
+      (> (juego-x j) ANCHO)
+      (< (juego-y j) 0) 
+      (> (juego-y j) ALTO)
+      (toca-negro? j)))
+
+;; ===========================================
+;; MANEJADORES DE EVENTOS
+;; ===========================================
+(define (dibujar j)
+  (cond
+    ;; Pantalla de inicio
+    [(juego-inicio? j)
+     (overlay/xy
+      (overlay
+       (text "LABERINTO" 60 "white")
+       (overlay/offset (text "¡No toques el negro!" 30 "cyan") 0 60
+       (overlay/offset (rectangle 200 80 "solid" "lime") 0 180
+       (overlay/offset (text "PLAY" 40 "black") 0 180
+       (overlay/offset (text "Mueve el mouse para jugar" 20 "gray") 0 280
+                       FONDO)))))
+      0 -100
+      FONDO)]
+    
+    ;; Juego normal
+    [else
+     (define nivel (juego-nivel j))
+     (define escena (place-image JUGADOR 
+                                (juego-x j) 
+                                (juego-y j)
+                                (obtener-nivel nivel)))
+     (cond
+       ;; Si perdió en el nivel 3, muestra la imagen de susto
+       [(and (juego-perdio? j) (= nivel 3))
+        (overlay IMAGEN-SUSTO (empty-scene ANCHO ALTO))]
+       
+       ;; Si perdió en otros niveles, muestra el texto
+       [(juego-perdio? j) 
+        (overlay (text "¡PERDISTE!" 40 "red") escena)]
+       
+       [(juego-pausa j) 
+        (overlay (text "PAUSA - Presiona P para continuar" 35 "yellow") escena)]
+       
+       [else 
+        (overlay (text (format "Nivel ~a - No toques el negro!" nivel) 25 "cyan") escena)])]))
+
+(define (manejar-mouse j x y evento)
+  (cond
+    [(juego-inicio? j)
+     (if (and (string=? evento "button-down")
+              (>= x (- (/ ANCHO 2) 100))
+              (<= x (+ (/ ANCHO 2) 100))
+              (>= y (- (/ ALTO 2) 40))
+              (<= y (+ (/ ALTO 2) 40)))
+         (let-values ([(px py) (posicion-inicial 1)])
+           (juego 1 px py #f #f #f #f))
+         j)]
+    
+    [(juego-pausa j) j]
+    [(and (juego-perdio? j) (string=? evento "button-down"))
+     (juego 1 0 0 #f #f #t #f)]  ; Reiniciar al menú principal al hacer clic
+    [(juego-perdio? j) j]
+    [else (begin
+            (set-juego-x! j x)
+            (set-juego-y! j y)
+            j)]))
+
+(define (manejar-teclado j tecla)
+  (cond
+    [(juego-inicio? j)
+     (if (or (key=? tecla " ") (key=? tecla "\r"))
+         (let-values ([(x y) (posicion-inicial 1)])
+           (juego 1 x y #f #f #f #f))
+         j)]
+    
+    [(key=? tecla "p") 
+     (juego (juego-nivel j) 
+            (juego-x j) 
+            (juego-y j) 
+            (juego-perdio? j) 
+            (not (juego-pausa j))
+            #f
+            (juego-audio-reproducido? j))]
+    [else j]))
+
+(define (actualizar j)
+  (cond
+    [(juego-inicio? j) j]
+    [(or (juego-perdio? j) (juego-pausa j)) j]
+    [(en-meta? j) 
+     (if (= (juego-nivel j) 3)
+         (juego 3 (juego-x j) (juego-y j) #t #f #f #t)
+         (let-values ([(x y) (posicion-inicial (add1 (juego-nivel j)))])
+           (juego (add1 (juego-nivel j)) x y #f #f #f #f)))]
+    [(debe-perder? j) 
+     (begin
+       (when (and (= (juego-nivel j) 3) 
+                  (not (juego-audio-reproducido? j)))
+         (reproducir-sonido))
+       (juego (juego-nivel j) 
+              (juego-x j) 
+              (juego-y j) 
+              #t 
+              (juego-pausa j)
+              #f
+              #t))]  ; Marcar audio como reproducido
+    [else j]))
+
+;; ===========================================
+;; INICIAR EL JUEGO
+;; ===========================================
+(define (iniciar-juego)
+  (big-bang (juego 1 0 0 #f #f #t #f)
+    [to-draw dibujar]
+    [on-mouse manejar-mouse]
+    [on-key manejar-teclado]
+    [on-tick actualizar 0.01]))
+
+(iniciar-juego)
