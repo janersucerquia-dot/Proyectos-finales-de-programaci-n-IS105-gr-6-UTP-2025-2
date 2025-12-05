@@ -1,0 +1,265 @@
+;; --- IMPORTACIONES ---
+(require 2htdp/image)
+(require 2htdp/universe)
+
+;; --- CONSTANTES DE PANTALLA ---
+(define WIDTH 800)
+(define HEIGHT 600)
+(define FONDO (bitmap/file "Menu.PNG"))
+
+;; --- CONSTANTES DE FÍSICA ---
+(define BALL-RADIO 15)
+(define HOLE-RADIO 25)
+(define FRICCION 0.98)
+(define FUERZA 0.15) 
+(define MAX-TIROS 5) ;; NUEVO: Límite de tiros por nivel
+
+;; --- IMÁGENES GLOBALES ---
+(define IMAGEN-BOLA (circle BALL-RADIO "solid" "red"))
+(define IMAGEN-HOLE (circle HOLE-RADIO "solid" "black"))
+(define IMAGEN-CANDADO (overlay (text "🔒" 40 "black") (square 80 "solid" "gray")))
+
+;; --- CONSTANTES DE INTERFAZ (BOTONES) ---
+;; Botón Continuar (Escena 3 - Victoria)
+(define BTN-CONT-X 500)
+(define BTN-CONT-Y 400)
+(define BTN-CONT-W 180)
+(define BTN-CONT-H 60)
+(define IMG-BTN-CONT (overlay (text "Continuar" 20 "white") (rectangle BTN-CONT-W BTN-CONT-H "solid" "green")))
+
+;; Botón Reintentar (Escena 3 y 4)
+(define BTN-RETRY-X 300)
+(define BTN-RETRY-Y 400)
+(define IMG-BTN-RETRY (overlay (text "Reintentar" 20 "black") (rectangle BTN-CONT-W BTN-CONT-H "solid" "yellow")))
+
+;; Botón Salir (Escena 1 - Selector)
+(define BTN-EXIT-X 100)
+(define BTN-EXIT-Y 50)
+(define IMG-BTN-EXIT (overlay (text "MENÚ" 15 "white") (rectangle 80 40 "solid" "red")))
+
+;; --- CONFIGURACIÓN DE NIVELES ---
+(define (obtener-inicio-nivel n)
+  (cond [(= n 1) (make-posn 100 300)]        
+        [(= n 2) (make-posn 100 100)]        
+        [(= n 3) (make-posn WIDTH 100)]     
+        [else (make-posn 100 300)]))
+
+(define (obtener-hoyo-nivel n)
+  (cond [(= n 1) (make-posn (- WIDTH 100) 300)]   
+        [(= n 2) (make-posn (- WIDTH 100) 500)]     
+        [(= n 3) (make-posn 100 500)]             
+        [else (make-posn (- WIDTH 100) 300)]))
+
+;; --- ESTRUCTURA DEL JUEGO ---
+;; NUEVO: Agregamos el campo 'tiros'
+;; escena: 0=Menu, 1=Selector, 2=Jugando, 3=Victoria, 4=Game Over
+(define-struct estado (escena nivel-actual desbloqueados tiros bola mouse-ini mouse-act))
+(define-struct bola (x y vx vy))
+
+;; Estado Inicial: tiros comienza en MAX-TIROS
+(define ESTADO-INICIAL 
+  (make-estado 0 1 1 MAX-TIROS (make-bola 0 0 0 0) #false #false))
+
+;; --- HITBOXES ---
+(define (clic-en-caja? mx my x y w h)
+  (and (> mx (- x (/ w 2))) (< mx (+ x (/ w 2)))
+       (> my (- y (/ h 2))) (< my (+ y (/ h 2)))))
+
+;; --- FÍSICA ---
+(define (mover-bola b)
+  (let* ((sig-x (+ (bola-x b) (bola-vx b)))
+         (sig-y (+ (bola-y b) (bola-vy b)))
+         (vel-x (* (bola-vx b) FRICCION))
+         (vel-y (* (bola-vy b) FRICCION)))
+    (make-bola
+     (cond [(>= (+ sig-x BALL-RADIO) WIDTH) (- WIDTH BALL-RADIO)]
+           [(<= (- sig-x BALL-RADIO) 0) BALL-RADIO]
+           [else sig-x])
+     (cond [(>= (+ sig-y BALL-RADIO) HEIGHT) (- HEIGHT BALL-RADIO)]
+           [(<= (- sig-y BALL-RADIO) 0) BALL-RADIO]
+           [else sig-y])
+     (cond [(or (>= (+ sig-x BALL-RADIO) WIDTH) (<= (- sig-x BALL-RADIO) 0)) (* vel-x -0.8)]
+           [else vel-x])
+     (cond [(or (>= (+ sig-y BALL-RADIO) HEIGHT) (<= (- sig-y BALL-RADIO) 0)) (* vel-y -0.8)]
+           [else vel-y]))))
+
+(define (distancia x1 y1 x2 y2)
+  (sqrt (+ (sqr (- x2 x1)) (sqr (- y2 y1)))))
+
+;; Auxiliar: ¿La bola está casi quieta? (Velocidad menor a 0.1)
+(define (bola-detenida? b)
+  (and (< (abs (bola-vx b)) 0.1) (< (abs (bola-vy b)) 0.1)))
+
+;; --- ACTUALIZAR MUNDO ---
+(define (actualizar e)
+  (cond
+    ;; Solo calculamos física si estamos en ESCENA 2 (Jugando)
+    [(not (= (estado-escena e) 2)) e]
+    
+    [else
+     (let* ([b (estado-bola e)]
+            [nivel (estado-nivel-actual e)]
+            [hoyo (obtener-hoyo-nivel nivel)]
+            [dist (distancia (bola-x b) (bola-y b) (posn-x hoyo) (posn-y hoyo))])
+       
+       (cond
+         ;; 1. VICTORIA: Entró al hoyo
+         [(< dist 15)
+          (make-estado 3 nivel (estado-desbloqueados e) (estado-tiros e) b #false #false)]
+         
+         ;; 2. GAME OVER: Se acabaron los tiros Y la bola se detuvo
+         [(and (= (estado-tiros e) 0) (bola-detenida? b))
+          (make-estado 4 nivel (estado-desbloqueados e) 0 b #false #false)] ;; Escena 4 = Perdiste
+         
+         ;; 3. SEGUIR JUGANDO
+         [else
+          (make-estado 2 nivel (estado-desbloqueados e) (estado-tiros e)
+                       (mover-bola b) (estado-mouse-ini e) (estado-mouse-act e))]))]))
+
+;; --- MANEJADOR DE MOUSE ---
+(define (mouse-handler e x y event)
+  (cond
+    ;; --- ESCENA 0: MENÚ ---
+    [(= (estado-escena e) 0)
+     (if (and (string=? event "button-down")
+              (clic-en-caja? x y (/ WIDTH 2) 400 200 60)) 
+         (make-estado 1 1 (estado-desbloqueados e) MAX-TIROS (estado-bola e) #false #false)
+         e)]
+
+    ;; --- ESCENA 1: SELECTOR DE NIVELES ---
+    [(= (estado-escena e) 1)
+     (if (string=? event "button-down")
+         (cond
+           ;; Botón Salir al Menú
+           [(clic-en-caja? x y BTN-EXIT-X BTN-EXIT-Y 80 40)
+            (make-estado 0 1 (estado-desbloqueados e) MAX-TIROS (make-bola 0 0 0 0) #false #false)] 
+           
+           ;; Selección de Niveles (Reinicia los tiros a MAX-TIROS)
+           [(clic-en-caja? x y 200 300 100 100) (iniciar-nivel e 1)]
+           [(and (clic-en-caja? x y 400 300 100 100) (>= (estado-desbloqueados e) 2)) (iniciar-nivel e 2)]
+           [(and (clic-en-caja? x y 600 300 100 100) (>= (estado-desbloqueados e) 3)) (iniciar-nivel e 3)]
+           [else e])
+         e)]
+
+    ;; --- ESCENA 2: JUGANDO ---
+    [(= (estado-escena e) 2)
+     ;; PROTECCIÓN: Solo permitimos disparar si hay tiros > 0 Y la bola está quieta
+     (if (and (> (estado-tiros e) 0) (bola-detenida? (estado-bola e)))
+         (cond
+           [(string=? event "button-down")
+            (make-estado 2 (estado-nivel-actual e) (estado-desbloqueados e) (estado-tiros e) (estado-bola e) (make-posn x y) (make-posn x y))]
+       
+           [(string=? event "drag")
+            (if (posn? (estado-mouse-ini e))
+                (make-estado 2 (estado-nivel-actual e) (estado-desbloqueados e) (estado-tiros e) (estado-bola e) (estado-mouse-ini e) (make-posn x y))
+                e)]
+       
+           [(string=? event "button-up")
+            (if (posn? (estado-mouse-ini e))
+                (let* ([ini (estado-mouse-ini e)]
+                       [dx (- (posn-x ini) x)]
+                       [dy (- (posn-y ini) y)])
+                  ;; AQUÍ RESTAMOS EL TIRO: (- (estado-tiros e) 1)
+                  (make-estado 2 (estado-nivel-actual e) (estado-desbloqueados e) 
+                               (- (estado-tiros e) 1) 
+                               (make-bola (bola-x (estado-bola e)) (bola-y (estado-bola e)) (* dx FUERZA) (* dy FUERZA))
+                               #false #false))
+                e)]
+           [else e])
+         e)] ;; Si no cumple la protección, ignoramos el evento
+
+    ;; --- ESCENA 3 (VICTORIA) y ESCENA 4 (GAME OVER) ---
+    [(or (= (estado-escena e) 3) (= (estado-escena e) 4))
+     (if (string=? event "button-down")
+         (cond
+           ;; Botón CONTINUAR (Solo funciona si ganaste, escena 3)
+           [(and (= (estado-escena e) 3) (clic-en-caja? x y BTN-CONT-X BTN-CONT-Y BTN-CONT-W BTN-CONT-H))
+            (let ([nivel (estado-nivel-actual e)])
+              (make-estado 1 
+                           nivel 
+                           (if (< nivel 3) (max (estado-desbloqueados e) (+ nivel 1)) 3) 
+                           MAX-TIROS (make-bola 0 0 0 0) #false #false))]
+           
+           ;; Botón REINTENTAR (Funciona en Victoria y en Game Over)
+           [(clic-en-caja? x y BTN-RETRY-X BTN-RETRY-Y BTN-CONT-W BTN-CONT-H)
+            (iniciar-nivel e (estado-nivel-actual e))]
+           
+           [else e])
+         e)]
+    
+    [else e]))
+
+(define (iniciar-nivel e n)
+  (let ([inicio (obtener-inicio-nivel n)])
+    ;; Al iniciar nivel, TIROS vuelve a MAX-TIROS (5)
+    (make-estado 2 n (estado-desbloqueados e) MAX-TIROS 
+                 (make-bola (posn-x inicio) (posn-y inicio) 0 0) 
+                 #false #false)))
+
+;; --- DIBUJADO ---
+(define (dibujar e)
+  (cond
+    ;; --- MENU ---
+    [(= (estado-escena e) 0)
+     (place-image (overlay (text "JUGAR" 30 "white") (rectangle 200 60 "solid" "blue"))
+                  (/ WIDTH 2) 400
+                  (place-image (text "MINI GOLF SUPER" 50 "darkgreen")
+                               (/ WIDTH 2) 200
+                               FONDO))]
+
+    ;; --- SELECTOR ---
+    [(= (estado-escena e) 1)
+     (place-image IMG-BTN-EXIT BTN-EXIT-X BTN-EXIT-Y 
+      (place-image (text "SELECCIONA UN NIVEL" 40 "black") (/ WIDTH 2) 100
+       (place-image (dibujar-boton-nivel 1 (estado-desbloqueados e)) 200 300
+        (place-image (dibujar-boton-nivel 2 (estado-desbloqueados e)) 400 300
+         (place-image (dibujar-boton-nivel 3 (estado-desbloqueados e)) 600 300
+          (rectangle WIDTH HEIGHT "solid" "lightblue"))))))]
+
+    ;; --- JUEGO (ESCENA 2) ---
+    [(= (estado-escena e) 2) (dibujar-juego-base e)]
+    
+    ;; --- VICTORIA (ESCENA 3) ---
+    [(= (estado-escena e) 3)
+     (place-image (text "¡NIVEL COMPLETADO!" 40 "blue") (/ WIDTH 2) 200
+      (place-image IMG-BTN-CONT BTN-CONT-X BTN-CONT-Y
+       (place-image IMG-BTN-RETRY BTN-RETRY-X BTN-RETRY-Y
+        (dibujar-juego-base e))))]
+    
+    ;; --- GAME OVER (ESCENA 4) ---
+    [(= (estado-escena e) 4)
+     (place-image (text "¡SIN TIROS!" 50 "red") (/ WIDTH 2) 200
+      (place-image (text "Perdiste :(" 30 "black") (/ WIDTH 2) 280
+       (place-image IMG-BTN-RETRY BTN-RETRY-X BTN-RETRY-Y
+        (dibujar-juego-base e))))])) 
+
+;; Función auxiliar para dibujar el juego y el HUD
+(define (dibujar-juego-base e)
+  (let* ([b (estado-bola e)]
+         [hoyo (obtener-hoyo-nivel (estado-nivel-actual e))]
+         [m1 (estado-mouse-ini e)]
+         [m2 (estado-mouse-act e)])
+    
+    ;; DIBUJAMOS EL HUD (Información en pantalla)
+    (place-image (text (string-append "NIVEL " (number->string (estado-nivel-actual e))) 20 "black") 50 30
+     (place-image (text (string-append "TIROS: " (number->string (estado-tiros e))) 20 "red") (- WIDTH 80) 30 ;; <-- CONTADOR DE TIROS
+      (place-image IMAGEN-HOLE (posn-x hoyo) (posn-y hoyo)
+       (place-image IMAGEN-BOLA (bola-x b) (bola-y b)
+        (if (and (posn? m1) (posn? m2))
+            (add-line (add-line FONDO (posn-x m1) (posn-y m1) (posn-x m2) (posn-y m2) "gray")
+                      (posn-x m1) (posn-y m1) (bola-x b) (bola-y b) "black")
+            FONDO)))))))
+
+(define (dibujar-boton-nivel n desbloqueados)
+  (if (>= desbloqueados n)
+      (overlay (text (number->string n) 40 "white") (square 80 "solid" "green"))
+      IMAGEN-CANDADO))
+
+(define (teclas e k)
+  (if (key=? k "r") (iniciar-nivel e (estado-nivel-actual e)) e))
+
+(big-bang ESTADO-INICIAL
+  (on-tick actualizar)
+  (on-mouse mouse-handler)
+  (on-key teclas)
+  (to-draw dibujar))
